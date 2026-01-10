@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.pyc
+.env
+.venv/
+
+# SQLite
+*.sqlite3
+*.db
+
+# Redis
+dump.rdb
+
+# Node / Vue
+node_modules/
+dist/
+
+# VS Code
+.vscode/
