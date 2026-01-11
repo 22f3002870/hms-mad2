@@ -7,6 +7,7 @@ from extensions import db
 from routes.auth import auth_bp
 from routes.patient import patient_bp
 from routes.admin import admin_bp
+from routes.doctor import doctor_bp
 
 
 def create_app():
@@ -18,6 +19,7 @@ def create_app():
     app.register_blueprint(auth_bp, url_prefix="/api")
     app.register_blueprint(patient_bp, url_prefix="/api/patient")
     app.register_blueprint(admin_bp, url_prefix="/api/admin")
+    app.register_blueprint(doctor_bp, url_prefix="/api/doctor")
 
     return app
 
