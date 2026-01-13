@@ -10,28 +10,33 @@ doctor_bp = Blueprint("doctor", __name__)
 # ---------------------------------------------------
 # DOCTOR DASHBOARD
 # ---------------------------------------------------
+from extensions import redis_client
+import json
+
 @doctor_bp.route("/dashboard", methods=["GET"])
 @login_required(role="doctor")
 def doctor_dashboard():
     user_id = session.get("user_id")
+    cache_key = f"doctor:dashboard:{user_id}"
+
+    cached = redis_client.get(cache_key)
+    if cached:
+        return jsonify(json.loads(cached))
 
     doctor = Doctor.query.filter_by(user_id=user_id).first()
-    if not doctor:
-        return jsonify({"error": "Doctor profile not found"}), 404
-
     appointments = Appointment.query.filter_by(doctor_id=doctor.id).all()
 
-    result = []
-    for a in appointments:
-        result.append({
-            "appointment_id": a.id,
-            "patient_id": a.patient_id,
-            "date": str(a.date),
-            "time": str(a.time),
-            "status": a.status
-        })
+    result = [{
+        "appointment_id": a.id,
+        "patient_id": a.patient_id,
+        "date": str(a.date),
+        "time": str(a.time),
+        "status": a.status
+    } for a in appointments]
 
+    redis_client.setex(cache_key, 60, json.dumps(result))
     return jsonify(result)
+
 
 
 # ---------------------------------------------------

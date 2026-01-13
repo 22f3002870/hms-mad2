@@ -5,6 +5,8 @@ from models import User, Patient, Doctor, Appointment, Treatment
 from extensions import db
 from utils.decorators import login_required
 
+from extensions import redis_client
+
 patient_bp = Blueprint("patient", __name__)
 
 
@@ -79,12 +81,23 @@ def patient_dashboard():
 
 from models import Doctor, User
 
+from extensions import redis_client
+import json
+
 @patient_bp.route("/doctors", methods=["GET"])
 @login_required(role="patient")
 def list_doctors_for_patient():
-    doctors = Doctor.query.all()
+    cache_key = "patient:doctors"
 
+    # 1️⃣ Try cache
+    cached = redis_client.get(cache_key)
+    if cached:
+        return jsonify(json.loads(cached))
+
+    # 2️⃣ DB fallback
+    doctors = Doctor.query.all()
     result = []
+
     for d in doctors:
         user = User.query.get(d.user_id)
         result.append({
@@ -93,6 +106,9 @@ def list_doctors_for_patient():
             "department_id": d.department_id,
             "is_available": d.is_available
         })
+
+    # 3️⃣ Save to Redis (TTL = 60 seconds)
+    redis_client.setex(cache_key, 60, json.dumps(result))
 
     return jsonify(result)
 
@@ -137,6 +153,11 @@ def book_appointment():
     db.session.add(appointment)
     db.session.commit()
 
+    # After booking appointment
+    redis_client.delete("patient:doctors")
+    redis_client.delete(f"doctor:dashboard:{doctor_id}")
+
+
     return jsonify({
         "message": "Appointment booked successfully",
         "appointment_id": appointment.id
@@ -174,7 +195,8 @@ def cancel_appointment(appointment_id):
 
     appointment.status = "Cancelled"
     db.session.commit()
-
+    # Invalidate cache
+    redis_client.delete(f"doctor:dashboard:{appointment.doctor_id}")
     return jsonify({"message": "Appointment cancelled"})
 
 from models import Treatment

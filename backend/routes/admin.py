@@ -4,18 +4,26 @@ from models import Doctor, Patient, Appointment
 
 admin_bp = Blueprint("admin", __name__)
 
+from extensions import redis_client
+import json
+
 @admin_bp.route("/dashboard", methods=["GET"])
 @login_required(role="admin")
 def admin_dashboard():
-    total_doctors = Doctor.query.count()
-    total_patients = Patient.query.count()
-    total_appointments = Appointment.query.count()
+    cache_key = "admin:dashboard"
 
-    return jsonify({
-        "total_doctors": total_doctors,
-        "total_patients": total_patients,
-        "total_appointments": total_appointments
-    })
+    cached = redis_client.get(cache_key)
+    if cached:
+        return jsonify(json.loads(cached))
+
+    data = {
+        "total_doctors": Doctor.query.count(),
+        "total_patients": Patient.query.count(),
+        "total_appointments": Appointment.query.count()
+    }
+
+    redis_client.setex(cache_key, 120, json.dumps(data))
+    return jsonify(data)
 
 from flask import request
 from models import User, Doctor
