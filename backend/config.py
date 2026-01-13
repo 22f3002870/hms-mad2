@@ -1,8 +1,8 @@
-import os
-
-BASE_DIR = os.path.abspath(os.path.dirname(__file__))
-
 class Config:
-    SECRET_KEY = "dev-secret-key"
-    SQLALCHEMY_DATABASE_URI = "sqlite:///" + os.path.join(BASE_DIR, "hms.db")
+    SECRET_KEY = "secret-key"
+    SQLALCHEMY_DATABASE_URI = "sqlite:///hms.db"
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+
+    # ✅ NEW STYLE CELERY CONFIG
+    broker_url = "redis://localhost:6379/0"
+    result_backend = "redis://localhost:6379/0"

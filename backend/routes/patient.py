@@ -1,31 +1,63 @@
-from flask import Blueprint, request, jsonify
-from models import User, Patient
+from flask import Blueprint, request, jsonify, session
+from datetime import datetime
+
+from models import User, Patient, Doctor, Appointment, Treatment
 from extensions import db
+from utils.decorators import login_required
 
 patient_bp = Blueprint("patient", __name__)
 
+
 @patient_bp.route("/register", methods=["POST"])
 def register_patient():
-    data = request.json
+    data = request.get_json()
 
-    user = User(
-        name=data["name"],
-        email=data["email"],
-        role="patient"
-    )
-    user.set_password(data["password"])
+    # 1. Basic validation
+    if not data or not data.get("name") or not data.get("email") or not data.get("password"):
+        return jsonify({
+            "error": "Name, email and password are required"
+        }), 400
 
-    db.session.add(user)
-    db.session.commit()
+    # 2. Check email uniqueness
+    existing_user = User.query.filter_by(email=data["email"]).first()
+    if existing_user:
+        return jsonify({
+            "error": "Email already registered"
+        }), 400
 
-    patient = Patient(
-        user_id=user.id,
-        age=data.get("age")
-    )
-    db.session.add(patient)
-    db.session.commit()
+    try:
+        # 3. Create user
+        user = User(
+            name=data["name"],
+            email=data["email"],
+            role="patient"
+        )
+        user.set_password(data["password"])
+        db.session.add(user)
+        db.session.flush()  # get user.id without commit
 
-    return jsonify({"message": "Patient registered successfully"})
+        # 4. Create patient profile
+        patient = Patient(
+            user_id=user.id,
+            age=data.get("age")
+        )
+        db.session.add(patient)
+
+        # 5. Commit once (atomic transaction)
+        db.session.commit()
+
+        return jsonify({
+            "message": "Patient registered successfully",
+            "patient_id": patient.id
+        }), 201
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "error": "Registration failed",
+            "details": str(e)
+        }), 500
+
 
 from flask import session
 from utils.decorators import login_required
@@ -167,3 +199,17 @@ def patient_history():
         })
 
     return jsonify(result)
+
+
+# ---------------- EXPORT (CELERY) ----------------
+@patient_bp.route("/export", methods=["POST"])
+@login_required(role="patient")
+def export_csv():
+    from celery_tasks import export_patient_treatments  # ✅ IMPORT INSIDE FUNCTION
+
+    user_id = session.get("user_id")
+    patient = Patient.query.filter_by(user_id=user_id).first()
+
+    export_patient_treatments.delay(patient.id)
+
+    return jsonify({"message": "Export started. You will be notified."})
