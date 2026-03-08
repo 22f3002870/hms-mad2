@@ -12,9 +12,17 @@ class User(db.Model):
     role = db.Column(db.String(20), nullable=False)  # admin / doctor / patient
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    token = db.Column(db.String(64), unique=True, nullable=True)
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
 
     def check_password(self, password):
         return check_password_hash(self.password_hash, password)
+
+
+from models.doctor import Doctor
+from models.patient import Patient
+
+User.doctor = db.relationship("Doctor", uselist=False, back_populates="user")
+User.patient = db.relationship("Patient", uselist=False, back_populates="user")

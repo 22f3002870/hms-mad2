@@ -7,3 +7,4 @@ class Patient(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), unique=True)
     age = db.Column(db.Integer)
 
+    user = db.relationship("User", backref="patient")

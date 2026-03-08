@@ -1,29 +1,32 @@
 from flask import Flask
-from config import Config
 from extensions import db
+from flask_cors import CORS
 
-from routes.auth import auth_bp
-from routes.patient import patient_bp
 from routes.admin import admin_bp
 from routes.doctor import doctor_bp
-
+from routes.auth import auth_bp
 
 def create_app():
     app = Flask(__name__)
-    app.config.from_object(Config)
+    app.config["SECRET_KEY"] = "dev-secret"
+    app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///hms.db"
+    app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+
+    CORS(app, supports_credentials=True)
 
     db.init_app(app)
 
-    app.register_blueprint(auth_bp, url_prefix="/api")
-    app.register_blueprint(patient_bp, url_prefix="/api/patient")
+    app.register_blueprint(auth_bp)
     app.register_blueprint(admin_bp, url_prefix="/api/admin")
     app.register_blueprint(doctor_bp, url_prefix="/api/doctor")
+
+    with app.app_context():
+        db.create_all()
 
     return app
 
 
-
 app = create_app()
+
 if __name__ == "__main__":
-    print("Starting Flask server...")
-    app.run(host="127.0.0.1", port=5000, debug=True)
+    app.run(debug=True)

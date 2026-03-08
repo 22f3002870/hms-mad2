@@ -1,110 +1,104 @@
-from flask import Blueprint, jsonify, session, request
-from datetime import datetime
-
+from flask import Blueprint, jsonify, request
 from utils.decorators import login_required
-from extensions import db
-from models import Doctor, Patient, Appointment, Treatment
+from extensions import db, redis_client
+from models import Doctor, Appointment, Treatment
+import json
 
 doctor_bp = Blueprint("doctor", __name__)
 
 # ---------------------------------------------------
-# DOCTOR DASHBOARD
+# 1️⃣ DOCTOR DASHBOARD (SUMMARY)
 # ---------------------------------------------------
-from extensions import redis_client
-import json
-
 @doctor_bp.route("/dashboard", methods=["GET"])
 @login_required(role="doctor")
 def doctor_dashboard():
-    user_id = session.get("user_id")
-    cache_key = f"doctor:dashboard:{user_id}"
+    user_id = request.user_id
 
+
+    doctor = Doctor.query.filter_by(user_id=user_id).first()
+    if not doctor:
+        return jsonify({"error": "Doctor not found"}), 404
+
+    cache_key = f"doctor:dashboard:{doctor.id}"
     cached = redis_client.get(cache_key)
     if cached:
         return jsonify(json.loads(cached))
 
-    doctor = Doctor.query.filter_by(user_id=user_id).first()
-    appointments = Appointment.query.filter_by(doctor_id=doctor.id).all()
+    data = {
+        "total_appointments": Appointment.query.filter_by(
+            doctor_id=doctor.id
+        ).count(),
+        "completed": Appointment.query.filter_by(
+            doctor_id=doctor.id, status="Completed"
+        ).count(),
+        "pending": Appointment.query.filter_by(
+            doctor_id=doctor.id, status="Booked"
+        ).count(),
+    }
 
-    result = [{
-        "appointment_id": a.id,
-        "patient_id": a.patient_id,
-        "date": str(a.date),
-        "time": str(a.time),
-        "status": a.status
-    } for a in appointments]
-
-    redis_client.setex(cache_key, 60, json.dumps(result))
-    return jsonify(result)
-
+    redis_client.setex(cache_key, 60, json.dumps(data))
+    return jsonify(data)
 
 
 # ---------------------------------------------------
-# UPDATE APPOINTMENT STATUS
+# 2️⃣ LIST DOCTOR APPOINTMENTS
 # ---------------------------------------------------
-@doctor_bp.route("/appointments/<int:appointment_id>/status", methods=["PUT"])
+@doctor_bp.route("/appointments", methods=["GET"])
 @login_required(role="doctor")
-def update_appointment_status(appointment_id):
-    data = request.get_json()
-    new_status = data.get("status")
+def get_doctor_appointments():
+    user_id = request.user_id
 
-    if new_status not in ["Completed", "Cancelled"]:
-        return jsonify({"error": "Invalid status"}), 400
-
-    user_id = session.get("user_id")
     doctor = Doctor.query.filter_by(user_id=user_id).first()
 
-    appointment = Appointment.query.get(appointment_id)
-    if not appointment:
-        return jsonify({"error": "Appointment not found"}), 404
+    if not doctor:
+        return jsonify({"error": "Doctor not found"}), 404
 
-    #  Ensure doctor owns the appointment
-    if appointment.doctor_id != doctor.id:
-        return jsonify({"error": "Unauthorized access"}), 403
+    appointments = Appointment.query.filter_by(
+        doctor_id=doctor.id
+    ).all()
 
-    # Prevent invalid transitions
-    if appointment.status in ["Completed", "Cancelled"]:
-        return jsonify({
-            "error": "Cannot modify a completed or cancelled appointment"
-        }), 400
+    return jsonify([
+        {
+            "appointment_id": a.id,
+            "date": str(a.date),
+            "time": str(a.time),
+            "status": a.status,
+            "patient_name": a.patient.user.name,
+            "patient_id": a.patient.id,
+            "has_treatment": Treatment.query.filter_by(
+                appointment_id=a.id
+            ).first() is not None
 
-    appointment.status = new_status
-    db.session.commit()
-
-    return jsonify({"message": "Appointment status updated"})
+        }
+        for a in appointments
+    ])
 
 
 # ---------------------------------------------------
-# ADD TREATMENT
+# 3️⃣ COMPLETE APPOINTMENT + ADD TREATMENT
 # ---------------------------------------------------
 @doctor_bp.route("/appointments/<int:appointment_id>/treatment", methods=["POST"])
 @login_required(role="doctor")
 def add_treatment(appointment_id):
     data = request.get_json()
+    user_id = request.user_id
 
-    user_id = session.get("user_id")
+
     doctor = Doctor.query.filter_by(user_id=user_id).first()
+    if not doctor:
+        return jsonify({"error": "Doctor not found"}), 404
 
-    appointment = Appointment.query.get(appointment_id)
-    if not appointment:
-        return jsonify({"error": "Appointment not found"}), 404
+    appointment = Appointment.query.get_or_404(appointment_id)
 
-    #  Ensure doctor owns the appointment
     if appointment.doctor_id != doctor.id:
-        return jsonify({"error": "Unauthorized access"}), 403
+        return jsonify({"error": "Unauthorized"}), 403
 
-    #  Cannot add treatment to cancelled appointment
-    if appointment.status == "Cancelled":
-        return jsonify({
-            "error": "Cannot add treatment to cancelled appointment"
-        }), 400
+    if appointment.status != "Booked":
+        return jsonify({"error": "Appointment already processed"}), 400
 
-    #  Prevent duplicate treatment
-    existing = Treatment.query.filter_by(
+    if Treatment.query.filter_by(
         appointment_id=appointment.id
-    ).first()
-
-    if existing:
+    ).first():
         return jsonify({"error": "Treatment already exists"}), 400
 
     treatment = Treatment(
@@ -114,32 +108,40 @@ def add_treatment(appointment_id):
         notes=data.get("notes")
     )
 
-    db.session.add(treatment)
     appointment.status = "Completed"
+    db.session.add(treatment)
     db.session.commit()
 
-    return jsonify({"message": "Treatment added successfully"})
+    # ✅ Clear dashboard cache
+    redis_client.delete(f"doctor:dashboard:{doctor.id}")
+
+    return jsonify({
+        "message": "Appointment completed & treatment added"
+    })
 
 
 # ---------------------------------------------------
-# VIEW PATIENT HISTORY (FOR DOCTOR)
+# 4️⃣ VIEW PATIENT HISTORY (DOCTOR-SPECIFIC)
 # ---------------------------------------------------
 @doctor_bp.route("/patients/<int:patient_id>/history", methods=["GET"])
 @login_required(role="doctor")
 def patient_history(patient_id):
-    user_id = session.get("user_id")
-    doctor = Doctor.query.filter_by(user_id=user_id).first()
+    user_id = request.user_id   # ✅ FIXED
 
-    appointments = Appointment.query.filter_by(
-        patient_id=patient_id,
-        doctor_id=doctor.id
-    ).all()
+    doctor = Doctor.query.filter_by(user_id=user_id).first()
+    if not doctor:
+        return jsonify({"error": "Doctor not found"}), 404
+
+    appointments = (
+        Appointment.query
+        .filter_by(doctor_id=doctor.id, patient_id=patient_id)
+        .all()
+    )
 
     result = []
+
     for a in appointments:
-        treatment = Treatment.query.filter_by(
-            appointment_id=a.id
-        ).first()
+        treatment = Treatment.query.filter_by(appointment_id=a.id).first()
 
         result.append({
             "appointment_id": a.id,
@@ -151,3 +153,61 @@ def patient_history(patient_id):
         })
 
     return jsonify(result)
+
+
+
+@doctor_bp.route("/appointments/<int:appointment_id>/treatment", methods=["PUT"])
+@login_required(role="doctor")
+def update_treatment(appointment_id):
+    data = request.get_json()
+    user_id = request.user_id
+
+    doctor = Doctor.query.filter_by(user_id=user_id).first()
+    if not doctor:
+        return jsonify({"error": "Doctor not found"}), 404
+
+    appointment = Appointment.query.get_or_404(appointment_id)
+
+    if appointment.doctor_id != doctor.id:
+        return jsonify({"error": "Unauthorized"}), 403
+
+    if not appointment.treatment:
+        return jsonify({"error": "Treatment not found"}), 404
+
+    # ✅ UPDATE FIELDS
+    appointment.treatment.diagnosis = data.get("diagnosis")
+    appointment.treatment.prescription = data.get("prescription")
+    appointment.treatment.notes = data.get("notes")
+
+    db.session.commit()
+
+    return jsonify({"message": "Treatment updated successfully"})
+
+
+
+@doctor_bp.route("/appointments/<int:appointment_id>/treatment", methods=["GET"])
+@login_required(role="doctor")
+def get_treatment(appointment_id):
+    user_id = request.user_id
+
+    doctor = Doctor.query.filter_by(user_id=user_id).first()
+    if not doctor:
+        return jsonify({"error": "Doctor not found"}), 404
+
+    appointment = Appointment.query.get_or_404(appointment_id)
+
+    if appointment.doctor_id != doctor.id:
+        return jsonify({"error": "Unauthorized"}), 403
+
+    treatment = Treatment.query.filter_by(
+        appointment_id=appointment.id
+    ).first()
+
+    if not treatment:
+        return jsonify({"error": "No treatment found"}), 404
+
+    return jsonify({
+        "diagnosis": treatment.diagnosis,
+        "prescription": treatment.prescription,
+        "notes": treatment.notes
+    })

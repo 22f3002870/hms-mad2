@@ -7,3 +7,7 @@ class Doctor(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), unique=True)
     department_id = db.Column(db.Integer, db.ForeignKey("departments.id"))
     is_available = db.Column(db.Boolean, default=True)
+
+    # ✅ ADD RELATIONSHIPS
+    user = db.relationship("User", backref="doctor", lazy=True)
+    department = db.relationship("Department", backref="doctors", lazy=True)

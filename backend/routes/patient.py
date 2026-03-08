@@ -1,4 +1,4 @@
-from flask import Blueprint, request, jsonify, session
+from flask import Blueprint, request, jsonify
 from datetime import datetime
 
 from models import User, Patient, Doctor, Appointment, Treatment
@@ -68,7 +68,8 @@ from models import Patient
 @patient_bp.route("/dashboard", methods=["GET"])
 @login_required(role="patient")
 def patient_dashboard():
-    user_id = session.get("user_id")
+    user_id = request.user_id
+
 
     patient = Patient.query.filter_by(user_id=user_id).first()
     if not patient:
@@ -89,25 +90,26 @@ import json
 def list_doctors_for_patient():
     cache_key = "patient:doctors"
 
-    # 1️⃣ Try cache
+    # 1️⃣ Try Redis cache
     cached = redis_client.get(cache_key)
     if cached:
         return jsonify(json.loads(cached))
 
     # 2️⃣ DB fallback
-    doctors = Doctor.query.all()
+    doctors = Doctor.query.filter_by(is_available=True).all()
     result = []
 
     for d in doctors:
         user = User.query.get(d.user_id)
         result.append({
             "doctor_id": d.id,
-            "name": user.name if user else None,
-            "department_id": d.department_id,
+            "doctor_name": d.user.name,
+            "department_name": d.department.name if d.department else None,
+            "department_description": d.department.description if d.department else None,
             "is_available": d.is_available
         })
 
-    # 3️⃣ Save to Redis (TTL = 60 seconds)
+    # 3️⃣ Save to Redis (TTL = 60s)
     redis_client.setex(cache_key, 60, json.dumps(result))
 
     return jsonify(result)
@@ -121,7 +123,8 @@ from extensions import db
 @login_required(role="patient")
 def book_appointment():
     data = request.get_json()
-    user_id = session.get("user_id")
+    user_id = request.user_id
+
 
     patient = Patient.query.filter_by(user_id=user_id).first()
     if not patient:
@@ -167,7 +170,8 @@ def book_appointment():
 @patient_bp.route("/appointments", methods=["GET"])
 @login_required(role="patient")
 def view_patient_appointments():
-    user_id = session.get("user_id")
+    user_id = request.user_id
+
     patient = Patient.query.filter_by(user_id=user_id).first()
 
     appointments = Appointment.query.filter_by(patient_id=patient.id).all()
@@ -204,7 +208,8 @@ from models import Treatment
 @patient_bp.route("/history", methods=["GET"])
 @login_required(role="patient")
 def patient_history():
-    user_id = session.get("user_id")
+    user_id = request.user_id
+
     patient = Patient.query.filter_by(user_id=user_id).first()
 
     appointments = Appointment.query.filter_by(patient_id=patient.id).all()
@@ -229,7 +234,8 @@ def patient_history():
 def export_csv():
     from celery_tasks import export_patient_treatments  # ✅ IMPORT INSIDE FUNCTION
 
-    user_id = session.get("user_id")
+    user_id = request.user_id
+
     patient = Patient.query.filter_by(user_id=user_id).first()
 
     export_patient_treatments.delay(patient.id)
