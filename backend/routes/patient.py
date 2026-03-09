@@ -214,24 +214,42 @@ from models import Treatment
 @patient_bp.route("/history", methods=["GET"])
 @login_required(role="patient")
 def patient_history():
+
     user_id = request.user_id
 
     patient = Patient.query.filter_by(user_id=user_id).first()
 
-    appointments = Appointment.query.filter_by(patient_id=patient.id).all()
+    if not patient:
+        return jsonify({"error": "Patient not found"}), 404
+
+    appointments = Appointment.query.filter_by(
+        patient_id=patient.id
+    ).order_by(Appointment.date.desc()).all()
 
     result = []
+
     for a in appointments:
-        treatment = Treatment.query.filter_by(appointment_id=a.id).first()
+
+        treatment = Treatment.query.filter_by(
+            appointment_id=a.id
+        ).first()
+
         result.append({
             "appointment_id": a.id,
             "status": a.status,
+
+            # ADD THESE TWO
+            "date": str(a.date) if a.date else None,
+            "time": str(a.time) if a.time else None,
+
             "diagnosis": treatment.diagnosis if treatment else None,
             "prescription": treatment.prescription if treatment else None,
             "notes": treatment.notes if treatment else None
         })
 
     return jsonify(result)
+
+
 
 
 # ---------------- EXPORT (CELERY) ----------------
@@ -352,4 +370,44 @@ def update_profile():
 
     return jsonify({
         "message": "Profile updated successfully"
+    })
+
+# ---------------- RESCHEDULE APPOINTMENT ----------------
+@patient_bp.route("/appointments/<int:appointment_id>/reschedule", methods=["PUT"])
+@login_required(role="patient")
+def reschedule_appointment(appointment_id):
+
+    data = request.get_json()
+    date = data.get("date")
+    time = data.get("time")
+
+    if not date or not time:
+        return jsonify({"error": "Date and time required"}), 400
+
+    appointment = Appointment.query.get(appointment_id)
+
+    if not appointment:
+        return jsonify({"error": "Appointment not found"}), 404
+
+    if appointment.status != "Booked":
+        return jsonify({"error": "Only booked appointments can be rescheduled"}), 400
+
+    # Prevent double booking
+    existing = Appointment.query.filter_by(
+        doctor_id=appointment.doctor_id,
+        date=date,
+        time=time,
+        status="Booked"
+    ).first()
+
+    if existing:
+        return jsonify({"error": "Doctor already booked for this slot"}), 400
+
+    appointment.date = date
+    appointment.time = time
+
+    db.session.commit()
+
+    return jsonify({
+        "message": "Appointment rescheduled successfully"
     })

@@ -238,3 +238,25 @@ def cancel_appointment(appointment_id):
     return jsonify({
         "message": "Appointment cancelled successfully"
     })
+
+# ---------------- UPDATE AVAILABILITY ----------------
+@doctor_bp.route("/availability", methods=["PUT"])
+@login_required(role="doctor")
+def update_availability():
+
+    user_id = request.user_id
+    data = request.json
+
+    doctor = Doctor.query.filter_by(user_id=user_id).first()
+
+    if not doctor:
+        return jsonify({"error": "Doctor not found"}), 404
+
+    doctor.is_available = data.get("is_available", True)
+
+    db.session.commit()
+
+    return jsonify({
+        "message": "Availability updated",
+        "is_available": doctor.is_available
+    })

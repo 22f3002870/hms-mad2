@@ -1,9 +1,22 @@
 from celery_worker import celery
 from datetime import date
 import csv
+import requests
 from functools import wraps
 from app import create_app
 from models import Appointment, Patient, User, Doctor, Treatment
+
+
+# --------------------------------------------------
+# GOOGLE CHAT WEBHOOK
+# --------------------------------------------------
+
+WEBHOOK_URL = "https://chat.googleapis.com/v1/spaces/AAQAiwMkmHE/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=m9GYj99z0UUgKQ9Pe-qayc-7eKqvYQOn1PJPlDX4X9E"
+
+
+# --------------------------------------------------
+# APP CONTEXT WRAPPER
+# --------------------------------------------------
 
 def with_app_context(fn):
     @wraps(fn)
@@ -13,6 +26,10 @@ def with_app_context(fn):
             return fn(*args, **kwargs)
     return wrapper
 
+
+# --------------------------------------------------
+# DAILY APPOINTMENT REMINDER
+# --------------------------------------------------
 
 @celery.task
 @with_app_context
@@ -36,12 +53,24 @@ def daily_appointment_reminder():
 
         message = (
             f"Reminder: {user.name}, you have an appointment today "
-            f"at {appt.time}."
+            f"at {appt.time}. Please visit the hospital."
         )
 
-        # For evaluation printing is acceptable
-        print("[DAILY REMINDER]", message)
+        # Send notification to Google Chat
+        try:
+            requests.post(
+                WEBHOOK_URL,
+                json={"text": message}
+            )
+            print("[DAILY REMINDER SENT]", message)
 
+        except Exception as e:
+            print("[REMINDER ERROR]", str(e))
+
+
+# --------------------------------------------------
+# MONTHLY DOCTOR ACTIVITY REPORT
+# --------------------------------------------------
 
 @celery.task
 @with_app_context
@@ -56,7 +85,10 @@ def monthly_doctor_report():
             status="Completed"
         ).all()
 
-        print(f"\n[MONTHLY REPORT] Doctor {doctor.id}")
+        if not appointments:
+            continue
+
+        report = f"<b>Monthly Activity Report</b>\nDoctor ID: {doctor.id}\n\n"
 
         for appt in appointments:
 
@@ -67,26 +99,44 @@ def monthly_doctor_report():
             diagnosis = treatment.diagnosis if treatment else "N/A"
             prescription = treatment.prescription if treatment else "N/A"
 
-            print(
-                f"Date: {appt.date} | "
-                f"Diagnosis: {diagnosis} | "
-                f"Prescription: {prescription}"
+            report += (
+                f"Date: {appt.date}\n"
+                f"Diagnosis: {diagnosis}\n"
+                f"Prescription: {prescription}\n\n"
             )
 
+        try:
+            requests.post(
+                WEBHOOK_URL,
+                json={"text": report}
+            )
 
+            print("[MONTHLY REPORT SENT]")
+            print(report)
+
+        except Exception as e:
+            print("[REPORT ERROR]", str(e))
+
+
+# --------------------------------------------------
+# USER TRIGGERED CSV EXPORT
+# --------------------------------------------------
 
 @celery.task
 @with_app_context
 def export_patient_treatments(patient_id):
+
     patient = Patient.query.get(patient_id)
     user = User.query.get(patient.user_id)
 
     filename = f"exports/patient_{patient_id}_treatments.csv"
 
     with open(filename, "w", newline="", encoding="utf-8") as f:
+
         writer = csv.writer(f)
+
         writer.writerow([
-            "Date",
+            "Appointment Date",
             "Doctor ID",
             "Diagnosis",
             "Prescription"
@@ -98,11 +148,13 @@ def export_patient_treatments(patient_id):
         ).all()
 
         for appt in appointments:
+
             treatment = Treatment.query.filter_by(
                 appointment_id=appt.id
             ).first()
 
             if treatment:
+
                 writer.writerow([
                     appt.date,
                     appt.doctor_id,
@@ -110,8 +162,20 @@ def export_patient_treatments(patient_id):
                     treatment.prescription
                 ])
 
-    
-    print(
-    f"[CSV EXPORT COMPLETE] File generated: {filename} "
-    f"for user {user.email}"
+    message = (
+        f"CSV Export Completed for {user.name}\n"
+        f"File Generated: {filename}"
     )
+
+    try:
+
+        requests.post(
+            WEBHOOK_URL,
+            json={"text": message}
+        )
+
+        print("[CSV EXPORT COMPLETE]", filename)
+
+    except Exception as e:
+
+        print("[CSV WEBHOOK ERROR]", str(e))
