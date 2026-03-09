@@ -306,3 +306,50 @@ def cancel_appointment(appointment_id):
         pass
 
     return jsonify({"message": "Appointment cancelled successfully"})
+
+# ---------------- PATIENT PROFILE ----------------
+@patient_bp.route("/profile", methods=["GET"])
+@login_required(role="patient")
+def get_profile():
+
+    user_id = request.user_id
+
+    patient = Patient.query.filter_by(user_id=user_id).first()
+
+    if not patient:
+        return jsonify({"error": "Patient not found"}), 404
+
+    return jsonify({
+        "name": patient.user.name,
+        "email": patient.user.email,
+        "age": patient.age
+    })
+
+
+# ---------------- UPDATE PROFILE ----------------
+@patient_bp.route("/profile", methods=["PUT"])
+@login_required(role="patient")
+def update_profile():
+
+    user_id = request.user_id
+    data = request.json
+
+    patient = Patient.query.filter_by(user_id=user_id).first()
+
+    if not patient:
+        return jsonify({"error": "Patient not found"}), 404
+
+    name = data.get("name")
+    age = data.get("age")
+
+    if name:
+        patient.user.name = name
+
+    if age:
+        patient.age = age
+
+    db.session.commit()
+
+    return jsonify({
+        "message": "Profile updated successfully"
+    })

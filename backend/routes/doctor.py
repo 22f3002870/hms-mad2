@@ -211,3 +211,30 @@ def get_treatment(appointment_id):
         "prescription": treatment.prescription,
         "notes": treatment.notes
     })
+
+
+# ---------------- CANCEL APPOINTMENT ----------------
+@doctor_bp.route("/appointments/<int:appointment_id>/cancel", methods=["PUT"])
+@login_required(role="doctor")
+def cancel_appointment(appointment_id):
+
+    appointment = Appointment.query.get(appointment_id)
+
+    if not appointment:
+        return jsonify({"error": "Appointment not found"}), 404
+
+    if appointment.status != "Booked":
+        return jsonify({
+            "error": "Only booked appointments can be cancelled"
+        }), 400
+
+    appointment.status = "Cancelled"
+
+    db.session.commit()
+
+    # Invalidate cache
+    redis_client.delete(f"doctor:dashboard:{appointment.doctor_id}")
+
+    return jsonify({
+        "message": "Appointment cancelled successfully"
+    })
