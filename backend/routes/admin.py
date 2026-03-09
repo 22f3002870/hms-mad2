@@ -70,12 +70,20 @@ def create_doctor():
 
     return jsonify({"message": "Doctor created successfully"})
 
-
 @admin_bp.route("/doctors", methods=["GET"])
 @login_required(role="admin")
 def list_doctors():
 
     search = request.args.get("search", "").strip()
+
+    cache_key = f"doctor_search:{search}"
+
+    try:
+        cached = redis_client.get(cache_key)
+        if cached:
+            return jsonify(json.loads(cached))
+    except Exception as e:
+        print("⚠️ Redis error:", e)
 
     query = Doctor.query
 
@@ -87,7 +95,7 @@ def list_doctors():
 
     doctors = query.all()
 
-    return jsonify([
+    data = [
         {
             "doctor_id": d.id,
             "name": d.user.name,
@@ -97,19 +105,35 @@ def list_doctors():
             "is_available": d.is_available
         }
         for d in doctors
-    ])
+    ]
+
+    try:
+        redis_client.setex(cache_key, 60, json.dumps(data))
+    except Exception as e:
+        print("⚠️ Redis set error:", e)
+
+    return jsonify(data)
+
 
 
 # ---------------------------------------------------
 # PATIENTS
 # ---------------------------------------------------
 
-
 @admin_bp.route("/patients", methods=["GET"])
 @login_required(role="admin")
 def list_patients():
 
-    search = request.args.get("search")
+    search = request.args.get("search", "").strip()
+
+    cache_key = f"patient_search:{search}"
+
+    try:
+        cached = redis_client.get(cache_key)
+        if cached:
+            return jsonify(json.loads(cached))
+    except Exception as e:
+        print("⚠️ Redis error:", e)
 
     query = Patient.query.join(User)
 
@@ -123,7 +147,7 @@ def list_patients():
 
     patients = query.all()
 
-    return jsonify([
+    data = [
         {
             "patient_id": p.id,
             "name": p.user.name,
@@ -131,7 +155,14 @@ def list_patients():
             "age": p.age
         }
         for p in patients
-    ])
+    ]
+
+    try:
+        redis_client.setex(cache_key, 60, json.dumps(data))
+    except Exception as e:
+        print("⚠️ Redis set error:", e)
+
+    return jsonify(data)
 
 # ---------------------------------------------------
 # APPOINTMENTS
