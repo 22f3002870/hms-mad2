@@ -7,4 +7,5 @@ class Patient(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), unique=True)
     age = db.Column(db.Integer)
 
-    user = db.relationship("User", backref="patient")
+    user = db.relationship("User", back_populates="patient")
+    appointments = db.relationship("Appointment", back_populates="patient")

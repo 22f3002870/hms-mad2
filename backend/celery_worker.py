@@ -14,3 +14,4 @@ celery.conf.update(
     timezone="Asia/Kolkata",
     enable_utc=True
 )
+import celery_tasks

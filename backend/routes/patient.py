@@ -100,7 +100,6 @@ def list_doctors_for_patient():
     result = []
 
     for d in doctors:
-        user = User.query.get(d.user_id)
         result.append({
             "doctor_id": d.id,
             "doctor_name": d.user.name,
@@ -114,7 +113,6 @@ def list_doctors_for_patient():
 
     return jsonify(result)
 
-
 from datetime import datetime
 from models import Appointment
 from extensions import db
@@ -125,14 +123,32 @@ def book_appointment():
     data = request.get_json()
     user_id = request.user_id
 
+    # Validate request body
+    if not data:
+        return jsonify({"error": "Invalid request body"}), 400
+
+    doctor_id = data.get("doctor_id")
+    date_str = data.get("date")
+    time_str = data.get("time")
+
+    # Validate required fields
+    if not doctor_id or not date_str or not time_str:
+        return jsonify({
+            "error": "doctor_id, date and time are required"
+        }), 400
+
+    # Convert date/time safely
+    try:
+        date = datetime.strptime(date_str, "%Y-%m-%d").strftime("%Y-%m-%d")
+        time = datetime.strptime(time_str, "%H:%M").strftime("%H:%M")
+    except ValueError:
+        return jsonify({
+            "error": "Invalid date or time format"
+        }), 400
 
     patient = Patient.query.filter_by(user_id=user_id).first()
     if not patient:
         return jsonify({"error": "Patient not found"}), 404
-
-    doctor_id = data.get("doctor_id")
-    date = datetime.strptime(data.get("date"), "%Y-%m-%d").date()
-    time = datetime.strptime(data.get("time"), "%H:%M").time()
 
     # Prevent double booking
     existing = Appointment.query.filter_by(
@@ -143,8 +159,11 @@ def book_appointment():
     ).first()
 
     if existing:
-        return jsonify({"error": "Doctor already booked for this slot"}), 400
+        return jsonify({
+            "error": "Doctor already booked for this slot"
+        }), 400
 
+    # Create appointment
     appointment = Appointment(
         patient_id=patient.id,
         doctor_id=doctor_id,
@@ -156,10 +175,9 @@ def book_appointment():
     db.session.add(appointment)
     db.session.commit()
 
-    # After booking appointment
+    # Invalidate cache
     redis_client.delete("patient:doctors")
     redis_client.delete(f"doctor:dashboard:{doctor_id}")
-
 
     return jsonify({
         "message": "Appointment booked successfully",
@@ -189,19 +207,7 @@ def view_patient_appointments():
     return jsonify(result)
 
 
-@patient_bp.route("/appointments/<int:appointment_id>/cancel", methods=["PUT"])
-@login_required(role="patient")
-def cancel_appointment(appointment_id):
-    appointment = Appointment.query.get(appointment_id)
 
-    if not appointment:
-        return jsonify({"error": "Appointment not found"}), 404
-
-    appointment.status = "Cancelled"
-    db.session.commit()
-    # Invalidate cache
-    redis_client.delete(f"doctor:dashboard:{appointment.doctor_id}")
-    return jsonify({"message": "Appointment cancelled"})
 
 from models import Treatment
 
@@ -241,3 +247,62 @@ def export_csv():
     export_patient_treatments.delay(patient.id)
 
     return jsonify({"message": "Export started. You will be notified."})
+
+from flask import send_file
+import os
+
+
+# ---------------- DOWNLOAD CSV ----------------
+@patient_bp.route("/export/download", methods=["GET"])
+@login_required(role="patient")
+def download_csv():
+
+    user_id = request.user_id
+
+    patient = Patient.query.filter_by(user_id=user_id).first()
+
+    filepath = f"exports/patient_{patient.id}_treatments.csv"
+
+    if not os.path.exists(filepath):
+        return jsonify({"error": "CSV not ready yet"}), 404
+
+    return send_file(
+        filepath,
+        as_attachment=True
+    )
+
+# ---------------- CANCEL APPOINTMENT ----------------
+@patient_bp.route("/appointments/<int:appointment_id>/cancel", methods=["PUT"])
+@login_required(role="patient")
+def cancel_appointment(appointment_id):
+
+    user_id = request.user_id
+
+    patient = Patient.query.filter_by(user_id=user_id).first()
+
+    if not patient:
+        return jsonify({"error": "Patient not found"}), 404
+
+    appointment = Appointment.query.filter_by(
+        id=appointment_id,
+        patient_id=patient.id
+    ).first()
+
+    if not appointment:
+        return jsonify({"error": "Appointment not found"}), 404
+
+    if appointment.status != "Booked":
+        return jsonify({"error": "Only booked appointments can be cancelled"}), 400
+
+    appointment.status = "Cancelled"
+    db.session.commit()
+
+    # Invalidate doctor dashboard cache
+
+
+    try:
+        redis_client.delete(f"doctor:dashboard:{appointment.doctor_id}")
+    except Exception:
+        pass
+
+    return jsonify({"message": "Appointment cancelled successfully"})

@@ -8,6 +8,6 @@ class Doctor(db.Model):
     department_id = db.Column(db.Integer, db.ForeignKey("departments.id"))
     is_available = db.Column(db.Boolean, default=True)
 
-    # ✅ ADD RELATIONSHIPS
-    user = db.relationship("User", backref="doctor", lazy=True)
-    department = db.relationship("Department", backref="doctors", lazy=True)
+    user = db.relationship("User", back_populates="doctor")
+    department = db.relationship("Department", back_populates="doctors")
+    appointments = db.relationship("Appointment", back_populates="doctor")
