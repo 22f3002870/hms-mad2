@@ -24,6 +24,19 @@ export default {
 <style>
 body {
   margin: 0;
+
+  /* Global background image */
+  background: url("@/assets/new.png") no-repeat center center fixed;
+
+  /* make image cover full screen */
+  background-size: cover;
+
+  /* fallback color if image not loaded */
   background-color: #f8f9fa;
+}
+
+/* make cards readable on top of background */
+.card {
+  background: rgba(255,255,255,0.95);
 }
 </style>

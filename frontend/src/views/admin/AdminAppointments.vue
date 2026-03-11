@@ -28,7 +28,7 @@
         >
           <td>{{ index + 1 }}</td>
           <td>{{ a.doctor_name }}</td>
-          <td>{{ a.department }}</td>
+          <td>{{ a.department_name || '-' }}</td>
           <td>{{ a.patient_name }}</td>
           <td>{{ a.date }}</td>
           <td>{{ a.time }}</td>

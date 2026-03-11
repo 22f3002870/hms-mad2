@@ -50,11 +50,21 @@
               Add Treatment
             </button>
 
+            <!-- Cancel Appointment -->
+            <button
+              v-if="a.status === 'Booked'"
+              class="btn btn-sm btn-danger me-2"
+              @click="cancelAppointment(a.appointment_id)"
+            >
+              Cancel
+            </button>
+
+
             <!-- Edit Treatment -->
             <button
               v-if="a.status === 'Completed' && a.has_treatment"
               class="btn btn-sm btn-warning"
-              @click="openTreatment(a)"
+              @click="openTreatment(a, 'edit')"
             >
               Edit Treatment
             </button>
@@ -75,6 +85,7 @@
     <AddTreatment
       v-if="selectedAppointment"
       :appointment="selectedAppointment"
+      :mode="selectedAppointment.mode"
       @close="selectedAppointment = null"
       @saved="onTreatmentSaved"
     />
@@ -115,8 +126,11 @@ export default {
       }
     },
 
-    openTreatment(appointment) {
-      this.selectedAppointment = appointment
+    openTreatment(appointment, mode = 'add') {
+      this.selectedAppointment = {
+        ...appointment,
+        mode
+      }
     },
 
     onTreatmentSaved() {
@@ -129,8 +143,31 @@ export default {
         alert('Patient ID missing')
         return
       }
+
       this.$router.push(`/doctor/patients/${patientId}/history`)
+    },
+
+    async cancelAppointment(id) {
+
+      if (!confirm("Cancel this appointment?")) return
+
+      try {
+
+        await api.put(`/doctor/appointments/${id}/cancel`)
+
+        alert("Appointment cancelled successfully")
+
+        this.loadAppointments()
+
+      } catch (err) {
+
+        alert(err.response?.data?.error || "Cancel failed")
+
+      }
+
     }
+
+
   },
 
   mounted() {
