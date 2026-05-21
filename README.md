@@ -258,4 +258,4 @@ redis-server
 
 **Parkhi Yadav**  
 📧 22f3002870@ds.study.iitm.ac.in  
-🏫 IIT Madras — BS in Data Science & Applications (Diploma Level)
+🏫 IIT Madras — BS in Data Science & Applications 
