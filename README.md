@@ -1,6 +1,3 @@
-# hms-mad2
-Hospital Management System – MAD II project
-
 # 🏥 Hospital Management System
 
 A full-stack web application that streamlines hospital operations by enabling patients to book appointments online, doctors to manage schedules and treatment notes, and admins to oversee the entire system.
